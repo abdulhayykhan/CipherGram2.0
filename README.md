@@ -29,7 +29,6 @@ Operates utilizing standard AndroidX Biometric cryptosystem pipelines coupled wi
 ```bash
 git clone <repository-url>
 cd CipherGram2.0
-
 ```
 
 2. **Open Project**:
@@ -47,10 +46,13 @@ Connect a physical Android device via USB (enable USB debugging) or start an AVD
 
 ## Local Data Models
 
-* `UserSession` (Entity): Controls individual auth session boundaries and active Instagram token states.
-* `EncryptedMessage` (Entity): Standard cryptographic payload storing encrypted texts, timestamps, and parsing signatures.
+* `UserSession`: Controls individual auth session boundaries and active Instagram token states (persisted securely via local Preferences).
+* `UserKeyPairEntity` (Room Entity): Stores the local user's E2EE public and private key pair mapped by Instagram username.
+* `ContactKeyEntity` (Room Entity): Stores synced public keys of contacts.
+* `ChatEntity` (Room Entity): Stores conversation threads, contact details, encryption status, and last message summary.
+* `MessageEntity` (Room Entity): Stores chat messages, including transport layer payload (ciphertext/plaintext), decrypted cache, and shared Instagram media details (URLs, captions, thumbnails, and types).
 * `CipherGramDao`: Exposes SQLite transaction layers wrapping target database channels.
-* `E2EECryptoEngine`: Cryptographic engine running algorithmic ratchets on local devices.
+* `E2EECryptoEngine`: Cryptographic engine running secure client-side asymmetric key processing operations.
 
 ## Project Structure
 
@@ -60,12 +62,11 @@ CipherGram2.0/
 ├── app/src/main/java/com/example/
 │   ├── cryptography/     # E2EECryptoEngine key processing operations
 │   ├── database/         # Room schema declarations, entities, repositories
-│   ├── ui/screens/       # Compose screens (ChatList, ChatThread, ShareDispatchSheet)
+│   ├── ui/screens/       # Compose screens (ChatListScreen, ChatThreadScreen, LoginScreen, SecuritySettingsScreen, ShareDispatchSheet)
 │   ├── ui/theme/         # System font, styling, color tokens
 │   └── viewmodel/        # Unified state processors handling backend data bridges
 ├── app/src/main/res/     # Vector drawables and system XML configurations
 └── build.gradle.kts      # Project module configurations 
-
 ```
 
 ## 📄 License
