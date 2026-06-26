@@ -1,0 +1,93 @@
+name: Android APK Build & Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      custom_tag:
+        description: 'Optional custom version tag (e.g., v1.1.0). If empty, auto-generates based on build number.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Debug and Release APKs
+        run: gradle assembleDebug assembleRelease --stacktrace
+
+      - name: Determine and Create Tag
+        id: version_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ ! -z "${{ github.event.inputs.custom_tag }}" ]; then
+            TAG_NAME="${{ github.event.inputs.custom_tag }}"
+            # Create and push the custom tag
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG_NAME"
+            git push origin "$TAG_NAME"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+          else
+            TAG_NAME="v1.0.${{ github.run_number }}"
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG_NAME"
+            git push origin "$TAG_NAME"
+          fi
+          echo "VERSION_TAG=$TAG_NAME" >> $GITHUB_ENV
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Rename APKs for Release
+        run: |
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/CipherGram-${{ env.VERSION_TAG }}-debug.apk
+          mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/CipherGram-${{ env.VERSION_TAG }}-release.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION_TAG }}
+          name: CipherGram Release ${{ env.VERSION_TAG }}
+          body: |
+            ## CipherGram Android Release ${{ env.VERSION_TAG }}
+            
+            This release contains the compiled APKs for the CipherGram secure client application.
+            
+            ### 📦 Download Links
+            * **[CipherGram-${{ env.VERSION_TAG }}-release.apk](https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION_TAG }}/CipherGram-${{ env.VERSION_TAG }}-release.apk)** - Production-ready optimized release APK (falls back to debug signature if custom keystore environment variables are not set).
+            * **[CipherGram-${{ env.VERSION_TAG }}-debug.apk](https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION_TAG }}/CipherGram-${{ env.VERSION_TAG }}-debug.apk)** - Debug signature APK, perfect for testing and sideloading.
+            
+            ---
+            *Automated build & release powered by GitHub Actions.*
+          draft: false
+          prerelease: false
+          files: |
+            app/build/outputs/apk/debug/CipherGram-${{ env.VERSION_TAG }}-debug.apk
+            app/build/outputs/apk/release/CipherGram-${{ env.VERSION_TAG }}-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

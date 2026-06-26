@@ -1,0 +1,6 @@
+{
+  "name": "CipherGram2.0",
+  "description": "Privacy-focused mobile chat application with robust end-to-end encryption for Instagram DMs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

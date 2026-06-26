@@ -1,0 +1,117 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- 1. Background glow centered at (54, 48) -->
+    <path
+        android:pathData="M54,18 C37.43,18 24,31.43 24,48 C24,64.57 37.43,78 54,78 C70.57,78 84,64.57 84,48 C84,31.43 70.57,18 54,18 Z"
+        android:fillColor="#1500E5FF" />
+
+    <!-- 2. Outer Speech Bubble Outer Glow Layer (Wide & Soft) -->
+    <path
+        android:pathData="M54,22 C68.36,22 80,33.64 80,48 C80,62.36 68.36,74 54,74 C50.2,74 46.5,73.18 43.2,71.7 L31,76 L35.5,64.8 C30.1,60.4 28,54.4 28,48 C28,33.64 39.64,22 54,22 Z"
+        android:strokeWidth="6.0"
+        android:strokeColor="#2000E5FF"
+        android:fillColor="#0800E5FF" />
+
+    <!-- Outer Speech Bubble Medium Glow Layer -->
+    <path
+        android:pathData="M54,22 C68.36,22 80,33.64 80,48 C80,62.36 68.36,74 54,74 C50.2,74 46.5,73.18 43.2,71.7 L31,76 L35.5,64.8 C30.1,60.4 28,54.4 28,48 C28,33.64 39.64,22 54,22 Z"
+        android:strokeWidth="3.5"
+        android:strokeColor="#6000E5FF"
+        android:fillColor="#00000000" />
+
+    <!-- Outer Speech Bubble Sharp Core Layer (Vivid Neon Cyan) -->
+    <path
+        android:pathData="M54,22 C68.36,22 80,33.64 80,48 C80,62.36 68.36,74 54,74 C50.2,74 46.5,73.18 43.2,71.7 L31,76 L35.5,64.8 C30.1,60.4 28,54.4 28,48 C28,33.64 39.64,22 54,22 Z"
+        android:strokeWidth="1.8"
+        android:strokeColor="#FF00E5FF"
+        android:fillColor="#00000000" />
+
+    <!-- 3. Inner Ring - Wide Glow -->
+    <path
+        android:pathData="M54,28 C65,28 74,37 74,48 C74,59 65,68 54,68 C43,68 34,59 34,48 C34,37 43,28 54,28 Z"
+        android:strokeWidth="4.0"
+        android:strokeColor="#1500E5FF"
+        android:fillColor="#00000000" />
+
+    <!-- Inner Ring - Core -->
+    <path
+        android:pathData="M54,28 C65,28 74,37 74,48 C74,59 65,68 54,68 C43,68 34,59 34,48 C34,37 43,28 54,28 Z"
+        android:strokeWidth="1.2"
+        android:strokeColor="#A033E1FF"
+        android:fillColor="#00000000" />
+
+    <!-- 4. Shield - Soft Glow -->
+    <path
+        android:pathData="M54,34 L44,38 L44,48 C44,55 48.5,59.5 54,62 C59.5,59.5 64,55 64,48 L64,38 Z"
+        android:strokeWidth="4.0"
+        android:strokeColor="#2000B0FF"
+        android:fillColor="#00000000" />
+
+    <!-- Shield - Core -->
+    <path
+        android:pathData="M54,34 L44,38 L44,48 C44,55 48.5,59.5 54,62 C59.5,59.5 64,55 64,48 L64,38 Z"
+        android:strokeWidth="1.8"
+        android:strokeColor="#FF00B0FF"
+        android:fillColor="#00000000" />
+
+    <!-- 5. Padlock Shackle - Soft Glow -->
+    <path
+        android:pathData="M51,46 V43 C51,41.3 52.3,40 54,40 C55.7,40 57,41.3 57,43 V46"
+        android:strokeWidth="3.0"
+        android:strokeColor="#2033E1FF"
+        android:fillColor="#00000000" />
+
+    <!-- Padlock Shackle - Core -->
+    <path
+        android:pathData="M51,46 V43 C51,41.3 52.3,40 54,40 C55.7,40 57,41.3 57,43 V46"
+        android:strokeWidth="1.5"
+        android:strokeColor="#FF33E1FF"
+        android:fillColor="#00000000" />
+
+    <!-- Padlock Body - Core (Filled glowing cyan/blue) -->
+    <path
+        android:pathData="M50,45 H58 C59.1,45 60,45.9 60,47 V52 C60,53.1 59.1,54 58,54 H50 C48.9,54 48,53.1 48,52 V47 C48,45.9 48.9,45 50,45 Z"
+        android:strokeWidth="1.2"
+        android:strokeColor="#FF00E5FF"
+        android:fillColor="#FF040B16" />
+
+    <!-- Padlock Center Letter 'C' -->
+    <path
+        android:pathData="M55.8,48.8 C55.2,48.4 54.5,48.2 53.8,48.5 C53.0,48.8 52.5,49.6 52.5,50.5 C52.5,51.4 53.0,52.2 53.8,52.5 C54.5,52.8 55.2,52.6 55.8,52.2"
+        android:strokeWidth="1.2"
+        android:strokeColor="#FFFFFFFF"
+        android:fillColor="#00000000" />
+
+    <!-- 6. Left Symmetrical Flanking Letter 'C' - Glow -->
+    <path
+        android:pathData="M41,45 C38.5,45 37,46.3 37,48 C37,49.7 38.5,51 41,51"
+        android:strokeWidth="3.5"
+        android:strokeColor="#2000E5FF"
+        android:fillColor="#00000000" />
+
+    <!-- Left Symmetrical Flanking Letter 'C' - Core -->
+    <path
+        android:pathData="M41,45 C38.5,45 37,46.3 37,48 C37,49.7 38.5,51 41,51"
+        android:strokeWidth="1.8"
+        android:strokeColor="#FF00E5FF"
+        android:fillColor="#00000000" />
+
+    <!-- 7. Right Symmetrical Flanking Letter 'G' - Glow -->
+    <path
+        android:pathData="M71,45 C68.5,45 67,46.3 67,48 C67,49.7 68.5,51 71,51 L71,48.5 H69.5"
+        android:strokeWidth="3.5"
+        android:strokeColor="#2000E5FF"
+        android:fillColor="#00000000" />
+
+    <!-- Right Symmetrical Flanking Letter 'G' - Core -->
+    <path
+        android:pathData="M71,45 C68.5,45 67,46.3 67,48 C67,49.7 68.5,51 71,51 L71,48.5 H69.5"
+        android:strokeWidth="1.8"
+        android:strokeColor="#FF00E5FF"
+        android:fillColor="#00000000" />
+
+</vector>
