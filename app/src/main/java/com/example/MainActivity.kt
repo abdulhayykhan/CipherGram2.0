@@ -170,9 +170,9 @@ fun BoxWithScreenTransition(
                             var finalPubKey = pubKey
                             var hasE2E = isE2E
 
-                            // Look up friend's profile on Firebase Firestore
-                            if (com.example.database.FirebaseSyncManager.isFirebaseAvailable) {
-                                val remoteProfile = com.example.database.FirebaseSyncManager.findUserProfile(username)
+                            // Look up friend's profile via Gateway
+                            if (viewModel.repository.gateway.isAvailable) {
+                                val remoteProfile = viewModel.repository.gateway.findUserProfile(username)
                                 if (remoteProfile != null) {
                                     val dbName = remoteProfile["fullName"] as? String
                                     val dbPubKey = remoteProfile["publicKeyBase64"] as? String
@@ -215,11 +215,11 @@ fun BoxWithScreenTransition(
                                 )
                             }
                             
-                            // Register thread metadata in Firestore so recipient can find it
-                            if (com.example.database.FirebaseSyncManager.isFirebaseAvailable) {
+                            // Register thread metadata via Gateway so recipient can find it
+                            if (viewModel.repository.gateway.isAvailable) {
                                 val currentUserSession = viewModel.userSession.value
                                 if (currentUserSession != null) {
-                                    com.example.database.FirebaseSyncManager.publishThreadMetadata(
+                                    viewModel.repository.gateway.publishThreadMetadata(
                                         threadId = newThreadId,
                                         contactUsername = currentUserSession.username,
                                         contactFullName = currentUserSession.fullName,

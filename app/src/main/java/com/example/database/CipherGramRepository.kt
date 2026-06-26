@@ -4,13 +4,28 @@ import android.util.Log
 import com.example.cryptography.E2EECryptoEngine
 import com.example.cryptography.HardwareCryptoEngine
 import com.example.cryptography.SecureEnvelopeProtocol
+import com.example.network.FirebaseMessagingGateway
+import com.example.network.MessagingGateway
+import com.example.network.OkHttpWebSocketGateway
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
-import java.security.spec.X509EncodedKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-class CipherGramRepository(private val dao: CipherGramDao) {
+class CipherGramRepository(
+    private val dao: CipherGramDao,
+    val gateway: MessagingGateway = if (try { com.google.firebase.FirebaseApp.getInstance(); true } catch (e: Exception) { false }) {
+        FirebaseMessagingGateway()
+    } else {
+        OkHttpWebSocketGateway()
+    }
+) {
 
     companion object {
         private const val TAG = "CipherGramRepository"
@@ -150,9 +165,9 @@ class CipherGramRepository(private val dao: CipherGramDao) {
         localUsername: String,
         senderUsername: String,
         message: MessageEntity
-    ): MessageEntity {
+    ): MessageEntity = withContext(Dispatchers.IO) {
         if (!message.isEncrypted || message.decryptedText != null) {
-            return message
+            return@withContext message
         }
 
         val userKeys = dao.getUserKeyPair(localUsername)
@@ -190,7 +205,7 @@ class CipherGramRepository(private val dao: CipherGramDao) {
                         if (decrypted != null) {
                             val updatedMessage = message.copy(decryptedText = decrypted)
                             dao.insertMessage(updatedMessage)
-                            return updatedMessage
+                            return@withContext updatedMessage
                         }
                     }
                 }
@@ -199,6 +214,76 @@ class CipherGramRepository(private val dao: CipherGramDao) {
             }
         }
 
-        return message.copy(decryptedText = "[Error: Unable to decrypt message. Session expired or keys mismatch.]")
+        return@withContext message.copy(decryptedText = "[Error: Unable to decrypt message. Session expired or keys mismatch.]")
+    }
+
+    /**
+     * Intercepts messages from the gateway, executes the cryptographic extraction pipeline
+     * on Dispatchers.IO, and commits the derived cleartext record smoothly.
+     */
+    fun observeAndProcessGatewayMessages(threadId: String, localUsername: String): Flow<MessageEntity> = callbackFlow {
+        val collectorScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
+        val job = collectorScope.launch {
+            gateway.observeIncomingMessages(threadId, localUsername).collect { rawMessage ->
+                // Check if message is already stored to prevent duplication
+                val existing = dao.getMessageById(rawMessage.messageId)
+                if (existing == null) {
+                    // Import sender public key from gateway registry if not locally present
+                    if (rawMessage.isEncrypted && rawMessage.senderUsername != localUsername) {
+                        val localContactKey = dao.getContactKey(rawMessage.senderUsername)
+                        if (localContactKey == null) {
+                            val senderProfile = gateway.findUserProfile(rawMessage.senderUsername)
+                            val remotePubKeyB64 = senderProfile?.get("publicKeyBase64") as? String
+                            if (!remotePubKeyB64.isNullOrEmpty()) {
+                                Log.d(TAG, "Auto-importing public key via gateway for sender: ${rawMessage.senderUsername}")
+                                dao.insertContactKey(
+                                    ContactKeyEntity(
+                                        contactUsername = rawMessage.senderUsername,
+                                        publicKeyBase64 = remotePubKeyB64,
+                                        isVerified = false
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Process and decrypt the incoming packet
+                    val processedMessage = decryptIncomingMessage(
+                        localUsername = localUsername,
+                        senderUsername = rawMessage.senderUsername,
+                        message = rawMessage
+                    )
+
+                    // Write processed message directly to SQLite
+                    dao.insertMessage(processedMessage)
+
+                    // Update parent chat entry summary
+                    val existingChat = dao.getChatById(threadId)
+                    if (existingChat != null) {
+                        if (existingChat.lastMessageTime < processedMessage.timestamp) {
+                            val textToShow = if (processedMessage.isEncrypted && processedMessage.senderUsername != localUsername) {
+                                processedMessage.decryptedText ?: "🔒 Encrypted Message"
+                            } else if (processedMessage.isEncrypted) {
+                                "🔒 Encrypted Message"
+                            } else {
+                                processedMessage.payload
+                            }
+                            dao.insertChat(
+                                existingChat.copy(
+                                    lastMessageText = textToShow,
+                                    lastMessageTime = processedMessage.timestamp
+                                )
+                            )
+                        }
+                    }
+
+                    trySend(processedMessage)
+                }
+            }
+        }
+
+        awaitClose {
+            job.cancel()
+        }
     }
 }

@@ -80,7 +80,7 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
                 if (keyPairEntity != null) {
                     _localKeyPair.value = keyPairEntity
                     // Sync online profile
-                    FirebaseSyncManager.publishUserProfile(
+                    repository.gateway.publishUserProfile(
                         username = session.username,
                         fullName = session.fullName,
                         publicKeyBase64 = keyPairEntity.publicKeyBase64,
@@ -94,22 +94,22 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private var activeThreadId: String? = null
+    private var messageListenerJob: kotlinx.coroutines.Job? = null
 
     fun enterChatThread(threadId: String) {
         val session = _userSession.value ?: return
         activeThreadId = threadId
-        FirebaseSyncManager.startListeningToThread(
-            getApplication(),
-            threadId = threadId,
-            localUsername = session.username,
-            repository = repository
-        )
+        messageListenerJob?.cancel()
+        messageListenerJob = viewModelScope.launch {
+            repository.observeAndProcessGatewayMessages(threadId, session.username).collect { message ->
+                Log.d("CipherGramViewModel", "New message processed via gateway: ${message.messageId}")
+            }
+        }
     }
 
     fun exitChatThread() {
-        activeThreadId?.let {
-            FirebaseSyncManager.stopListeningToThread(it)
-        }
+        messageListenerJob?.cancel()
+        messageListenerJob = null
         activeThreadId = null
     }
 
@@ -176,7 +176,7 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
 
             // 3. Publish profile to Firestore for real-time E2EE discovery
             if (keyPairEntity != null) {
-                FirebaseSyncManager.publishUserProfile(
+                repository.gateway.publishUserProfile(
                     username = session.username,
                     fullName = session.fullName,
                     publicKeyBase64 = keyPairEntity.publicKeyBase64,
@@ -216,19 +216,8 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
                 mediaCaption = mediaCaption
             )
 
-            // Publish message to Firestore
-            FirebaseSyncManager.publishMessage(
-                threadId = threadId,
-                messageId = messageEntity.messageId,
-                senderUsername = session.username,
-                payload = messageEntity.payload,
-                isEncrypted = messageEntity.isEncrypted,
-                timestamp = messageEntity.timestamp,
-                mediaUrl = mediaUrl,
-                mediaType = mediaType,
-                mediaThumbnail = mediaThumbnail,
-                mediaCaption = mediaCaption
-            )
+            // Publish message via Gateway
+            repository.gateway.dispatchEnvelope(threadId, messageEntity)
 
             // Simulate immediate automated E2EE response if recipient is an E2EE contact
             if (contactUsername == "alex_priv") {
