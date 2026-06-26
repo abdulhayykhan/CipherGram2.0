@@ -260,20 +260,12 @@ fun ChatListItem(
     ) {
         // Avatar with status indicator ring
         Box(contentAlignment = Alignment.BottomEnd) {
-            Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(CircleShape)
-                    .background(BorderColor)
-            ) {
-                // Image loader or visual fallback
-                AsyncImage(
-                    model = chat.avatarUrl,
-                    contentDescription = "${chat.contactFullName} Avatar",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            CipherGramAvatar(
+                avatarUrl = chat.avatarUrl,
+                name = chat.contactFullName.ifEmpty { chat.contactUsername },
+                size = 54.dp,
+                modifier = Modifier.size(54.dp)
+            )
 
             // Online indicator dot
             if (chat.isOnline) {

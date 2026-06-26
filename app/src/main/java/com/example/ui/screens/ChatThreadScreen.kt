@@ -84,19 +84,12 @@ fun ChatThreadScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable { showSafetyVerification = true }
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(BorderColor)
-                        ) {
-                            AsyncImage(
-                                model = chat.avatarUrl,
-                                contentDescription = "${chat.contactFullName} Avatar",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+                        CipherGramAvatar(
+                            avatarUrl = chat.avatarUrl,
+                            name = chat.contactFullName.ifEmpty { chat.contactUsername },
+                            size = 38.dp,
+                            modifier = Modifier.size(38.dp)
+                        )
 
                         Spacer(modifier = Modifier.width(12.dp))
 
