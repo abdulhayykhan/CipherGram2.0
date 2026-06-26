@@ -111,6 +111,54 @@ object E2EECryptoEngine {
         }
     }
 
+    fun encryptToBytes(plaintext: String, symmetricKey: SecretKeySpec): ByteArray? {
+        return try {
+            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+            val iv = ByteArray(GCM_IV_LENGTH_BYTES).apply {
+                SecureRandom().nextBytes(this)
+            }
+            val gcmSpec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
+            cipher.init(Cipher.ENCRYPT_MODE, symmetricKey, gcmSpec)
+            
+            val plaintextBytes = plaintext.toByteArray(Charsets.UTF_8)
+            val ciphertext = cipher.doFinal(plaintextBytes)
+
+            val combined = ByteArray(iv.size + ciphertext.size)
+            System.arraycopy(iv, 0, combined, 0, iv.size)
+            System.arraycopy(ciphertext, 0, combined, iv.size, ciphertext.size)
+            combined
+        } catch (e: Exception) {
+            Log.e(TAG, "Encryption to bytes failure: ${e.message}", e)
+            null
+        }
+    }
+
+    fun decryptFromBytes(combined: ByteArray, symmetricKey: SecretKeySpec): String? {
+        return try {
+            if (combined.size <= GCM_IV_LENGTH_BYTES) {
+                Log.e(TAG, "Payload size is too small")
+                return null
+            }
+
+            val iv = ByteArray(GCM_IV_LENGTH_BYTES)
+            System.arraycopy(combined, 0, iv, 0, GCM_IV_LENGTH_BYTES)
+
+            val ciphertextSize = combined.size - GCM_IV_LENGTH_BYTES
+            val ciphertext = ByteArray(ciphertextSize)
+            System.arraycopy(combined, GCM_IV_LENGTH_BYTES, ciphertext, 0, ciphertextSize)
+
+            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+            val gcmSpec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
+            cipher.init(Cipher.DECRYPT_MODE, symmetricKey, gcmSpec)
+
+            val decryptedBytes = cipher.doFinal(ciphertext)
+            String(decryptedBytes, Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.e(TAG, "Decryption from bytes failure: ${e.message}", e)
+            null
+        }
+    }
+
     /**
      * Decrypts a secure CipherGram transport envelope.
      */

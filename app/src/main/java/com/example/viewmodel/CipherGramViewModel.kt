@@ -7,6 +7,8 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cryptography.E2EECryptoEngine
+import com.example.cryptography.HardwareCryptoEngine
+import com.example.cryptography.SecureEnvelopeProtocol
 import com.example.database.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -159,14 +161,13 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
             // 2. Generate local E2EE keys if they don't already exist
             var keyPairEntity = repository.getUserKeyPair(session.username)
             if (keyPairEntity == null) {
-                val keyPair = E2EECryptoEngine.generateKeyPair()
-                if (keyPair != null) {
-                    val publicB64 = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
-                    val privateB64 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
+                val hardwarePubKey = HardwareCryptoEngine.generateHardwareKeyPair(session.username)
+                if (hardwarePubKey != null) {
+                    val publicB64 = E2EECryptoEngine.publicKeyToBase64(hardwarePubKey)
                     keyPairEntity = UserKeyPairEntity(
                         instagramUsername = session.username,
                         publicKeyBase64 = publicB64,
-                        privateKeyBase64 = privateB64
+                        privateKeyBase64 = "HARDWARE_BACKED"
                     )
                     repository.insertUserKeyPair(keyPairEntity)
                 }
@@ -262,10 +263,10 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
                 if (alexKeyPair != null && localUserPubKey != null) {
                     val aesKeySpec = E2EECryptoEngine.deriveSymmetricKey(alexKeyPair.private, localUserPubKey)
                     if (aesKeySpec != null) {
-                        val encrypted = E2EECryptoEngine.encrypt(replyText, aesKeySpec)
-                        if (encrypted != null) {
+                        val encryptedBytes = E2EECryptoEngine.encryptToBytes(replyText, aesKeySpec)
+                        if (encryptedBytes != null) {
                             isEncrypted = true
-                            finalPayload = encrypted
+                            finalPayload = SecureEnvelopeProtocol.pack(encryptedBytes)
                             decryptedText = replyText
                         } else {
                             isEncrypted = false
@@ -321,14 +322,13 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _isGeneratingKeys.value = true
             
-            val keyPair = E2EECryptoEngine.generateKeyPair()
-            if (keyPair != null) {
-                val publicB64 = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
-                val privateB64 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
+            val hardwarePubKey = HardwareCryptoEngine.generateHardwareKeyPair(session.username)
+            if (hardwarePubKey != null) {
+                val publicB64 = E2EECryptoEngine.publicKeyToBase64(hardwarePubKey)
                 val keyPairEntity = UserKeyPairEntity(
                     instagramUsername = session.username,
                     publicKeyBase64 = publicB64,
-                    privateKeyBase64 = privateB64
+                    privateKeyBase64 = "HARDWARE_BACKED"
                 )
                 repository.insertUserKeyPair(keyPairEntity)
                 _localKeyPair.value = keyPairEntity

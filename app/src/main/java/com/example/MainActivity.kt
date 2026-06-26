@@ -100,6 +100,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleSendIntent(intent: Intent?) {
+        if (intent != null) {
+            val sharedMediaUrl = intent.getStringExtra("SHARED_MEDIA_URL")
+            if (!sharedMediaUrl.isNullOrEmpty()) {
+                viewModel.setSharedMediaUrl(sharedMediaUrl)
+                return
+            }
+        }
         if (intent != null && intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
             if (!sharedText.isNullOrEmpty()) {

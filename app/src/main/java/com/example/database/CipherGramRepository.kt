@@ -2,6 +2,8 @@ package com.example.database
 
 import android.util.Log
 import com.example.cryptography.E2EECryptoEngine
+import com.example.cryptography.HardwareCryptoEngine
+import com.example.cryptography.SecureEnvelopeProtocol
 import kotlinx.coroutines.flow.Flow
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
@@ -41,7 +43,7 @@ class CipherGramRepository(private val dao: CipherGramDao) {
     suspend fun clearMessages(threadId: String) = dao.clearMessagesForThread(threadId)
 
     /**
-     * Attempts to encrypt a outgoing message payload using real E2EE.
+     * Attempts to encrypt an outgoing message payload using hardware-backed E2EE.
      * If keys are missing, falls back to plaintext (hybrid mode).
      */
     suspend fun encryptOutgoingMessage(
@@ -63,26 +65,33 @@ class CipherGramRepository(private val dao: CipherGramDao) {
 
         if (userKeys != null && contactKeys != null) {
             try {
-                // Reconstruct local private key
-                val privateKeyBytes = android.util.Base64.decode(userKeys.privateKeyBase64, android.util.Base64.DEFAULT)
-                val pkcs8Spec = PKCS8EncodedKeySpec(privateKeyBytes)
-                val kf = KeyFactory.getInstance("EC")
-                val localPrivateKey = kf.generatePrivate(pkcs8Spec)
-
                 // Reconstruct remote public key
                 val remotePublicKey = E2EECryptoEngine.publicKeyFromBase64(contactKeys.publicKeyBase64)
 
                 if (remotePublicKey != null) {
-                    // Derive shared secret and AES key
-                    val aesKey = E2EECryptoEngine.deriveSymmetricKey(localPrivateKey, remotePublicKey)
+                    val aesKey = if (userKeys.privateKeyBase64 == "HARDWARE_BACKED") {
+                        val sharedSecret = HardwareCryptoEngine.deriveSharedSecret(senderUsername, remotePublicKey)
+                        if (sharedSecret != null) {
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                            val derivedBytes = digest.digest(sharedSecret)
+                            SecretKeySpec(derivedBytes, "AES")
+                        } else null
+                    } else {
+                        val privateKeyBytes = android.util.Base64.decode(userKeys.privateKeyBase64, android.util.Base64.DEFAULT)
+                        val pkcs8Spec = PKCS8EncodedKeySpec(privateKeyBytes)
+                        val kf = KeyFactory.getInstance("EC")
+                        val localPrivateKey = kf.generatePrivate(pkcs8Spec)
+                        E2EECryptoEngine.deriveSymmetricKey(localPrivateKey, remotePublicKey)
+                    }
+
                     if (aesKey != null) {
-                        val encrypted = E2EECryptoEngine.encrypt(text, aesKey)
-                        if (encrypted != null) {
+                        val encryptedBytes = E2EECryptoEngine.encryptToBytes(text, aesKey)
+                        if (encryptedBytes != null) {
                             isEncrypted = true
-                            finalPayload = encrypted
+                            finalPayload = SecureEnvelopeProtocol.pack(encryptedBytes)
                             decryptedText = text // Cache locally for direct viewing
                         } else {
-                            throw Exception("AES encryption returned null")
+                            throw Exception("AES GCM encryption failed")
                         }
                     } else {
                         throw Exception("Key agreement failed")
@@ -151,19 +160,33 @@ class CipherGramRepository(private val dao: CipherGramDao) {
 
         if (userKeys != null && senderKeys != null) {
             try {
-                // Reconstruct local private key
-                val privateKeyBytes = android.util.Base64.decode(userKeys.privateKeyBase64, android.util.Base64.DEFAULT)
-                val pkcs8Spec = PKCS8EncodedKeySpec(privateKeyBytes)
-                val kf = KeyFactory.getInstance("EC")
-                val localPrivateKey = kf.generatePrivate(pkcs8Spec)
-
                 // Reconstruct remote public key
                 val remotePublicKey = E2EECryptoEngine.publicKeyFromBase64(senderKeys.publicKeyBase64)
 
                 if (remotePublicKey != null) {
-                    val aesKey = E2EECryptoEngine.deriveSymmetricKey(localPrivateKey, remotePublicKey)
+                    val aesKey = if (userKeys.privateKeyBase64 == "HARDWARE_BACKED") {
+                        val sharedSecret = HardwareCryptoEngine.deriveSharedSecret(localUsername, remotePublicKey)
+                        if (sharedSecret != null) {
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                            val derivedBytes = digest.digest(sharedSecret)
+                            SecretKeySpec(derivedBytes, "AES")
+                        } else null
+                    } else {
+                        val privateKeyBytes = android.util.Base64.decode(userKeys.privateKeyBase64, android.util.Base64.DEFAULT)
+                        val pkcs8Spec = PKCS8EncodedKeySpec(privateKeyBytes)
+                        val kf = KeyFactory.getInstance("EC")
+                        val localPrivateKey = kf.generatePrivate(pkcs8Spec)
+                        E2EECryptoEngine.deriveSymmetricKey(localPrivateKey, remotePublicKey)
+                    }
+
                     if (aesKey != null) {
-                        val decrypted = E2EECryptoEngine.decrypt(message.payload, aesKey)
+                        val unpackedBytes = SecureEnvelopeProtocol.unpack(message.payload)
+                        val decrypted = if (unpackedBytes != null) {
+                            E2EECryptoEngine.decryptFromBytes(unpackedBytes, aesKey)
+                        } else {
+                            E2EECryptoEngine.decrypt(message.payload, aesKey)
+                        }
+
                         if (decrypted != null) {
                             val updatedMessage = message.copy(decryptedText = decrypted)
                             dao.insertMessage(updatedMessage)
