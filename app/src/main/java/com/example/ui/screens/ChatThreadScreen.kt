@@ -67,7 +67,6 @@ fun ChatThreadScreen(
     // Bottom sheet or dialog states
     var showSafetyVerification by remember { mutableStateOf(false) }
     var inspectedMessage by remember { mutableStateOf<MessageEntity?>(null) }
-    var showMediaAttachmentShortcuts by remember { mutableStateOf(false) }
 
     // Scroll to bottom when list sizes change
     LaunchedEffect(messages.size) {
@@ -229,54 +228,6 @@ fun ChatThreadScreen(
                 }
             }
 
-            // Media attachment shortcuts panel
-            AnimatedVisibility(
-                visible = showMediaAttachmentShortcuts,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DarkSurface)
-                        .border(1.dp, BorderColor)
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    AttachmentShortcutCard(
-                        title = "Post: Brutalism Art",
-                        type = "POST",
-                        thumbnail = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=100&q=80",
-                        onClick = {
-                            onSendMessage(
-                                "Check out this futuristic Post!",
-                                "https://www.instagram.com/p/C_m3N9xO2Z9",
-                                "POST",
-                                "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80",
-                                "Explorations in Futuristic Brutalism. Aesthetic pairings using generous spacing & dark slate tones."
-                            )
-                            showMediaAttachmentShortcuts = false
-                        }
-                    )
-
-                    AttachmentShortcutCard(
-                        title = "Reel: Synth Beat",
-                        type = "REEL",
-                        thumbnail = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=100&q=80",
-                        onClick = {
-                            onSendMessage(
-                                "This reel is incredible! 🎹",
-                                "https://www.instagram.com/reel/C8q8-fMy9a8",
-                                "REEL",
-                                "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=400&q=80",
-                                "Infinite scrolling synth loops. Tap to hear the diaphragmatic bass drop! 🎹🥁"
-                            )
-                            showMediaAttachmentShortcuts = false
-                        }
-                    )
-                }
-            }
-
             // Message Input bar
             Row(
                 modifier = Modifier
@@ -286,21 +237,6 @@ fun ChatThreadScreen(
                     .navigationBarsPadding(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Media shortcut toggle
-                IconButton(
-                    onClick = { showMediaAttachmentShortcuts = !showMediaAttachmentShortcuts },
-                    modifier = Modifier.testTag("attach_button")
-                ) {
-                    Icon(
-                        imageVector = if (showMediaAttachmentShortcuts) Icons.Default.Close else Icons.Default.AddCircleOutline,
-                        contentDescription = "Attach Media Links",
-                        tint = if (showMediaAttachmentShortcuts) CyberPrimary else CyberSecondary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
                 // Input Text field
                 OutlinedTextField(
                     value = inputText,
@@ -697,57 +633,6 @@ fun EqualizerVisualizer() {
                     .height(barHeight.dp)
                     .background(CyberSecondary, RoundedCornerShape(2.dp))
             )
-        }
-    }
-}
-
-@Composable
-fun AttachmentShortcutCard(
-    title: String,
-    type: String,
-    thumbnail: String,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .width(160.dp)
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color.Black),
-        border = BorderStroke(1.dp, BorderColor)
-    ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.DarkGray)
-            ) {
-                AsyncImage(
-                    model = thumbnail,
-                    contentDescription = title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OnSurfaceColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "Share $type",
-                    fontSize = 9.sp,
-                    color = CyberPrimary
-                )
-            }
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.util.Base64
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -56,7 +57,38 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
 
     init {
         // Automatically check if user was already "logged in"
-        // For development baseline, let's keep it clean
+        viewModelScope.launch {
+            val sharedPrefs = getApplication<Application>().getSharedPreferences("ciphergram_prefs", Context.MODE_PRIVATE)
+            val savedUsername = sharedPrefs.getString("saved_username", null)
+            val savedFullName = sharedPrefs.getString("saved_fullname", null)
+            val savedToken = sharedPrefs.getString("saved_token", null)
+            val savedAvatarUrl = sharedPrefs.getString("saved_avatar_url", null)
+
+            if (!savedUsername.isNullOrEmpty() && !savedFullName.isNullOrEmpty()) {
+                val session = UserSession(
+                    username = savedUsername,
+                    fullName = savedFullName,
+                    token = savedToken ?: "ig_session_${(100000..999999).random()}",
+                    avatarUrl = savedAvatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
+                )
+                _userSession.value = session
+
+                // Fetch local key pair
+                val keyPairEntity = repository.getUserKeyPair(session.username)
+                if (keyPairEntity != null) {
+                    _localKeyPair.value = keyPairEntity
+                    // Sync online profile
+                    FirebaseSyncManager.publishUserProfile(
+                        username = session.username,
+                        fullName = session.fullName,
+                        publicKeyBase64 = keyPairEntity.publicKeyBase64,
+                        avatarUrl = session.avatarUrl
+                    )
+                }
+
+                _currentScreen.value = Screen.ChatList
+            }
+        }
     }
 
     private var activeThreadId: String? = null
@@ -115,6 +147,15 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
             )
             _userSession.value = session
 
+            // Save user session to SharedPreferences for persistent login
+            val sharedPrefs = getApplication<Application>().getSharedPreferences("ciphergram_prefs", Context.MODE_PRIVATE)
+            sharedPrefs.edit()
+                .putString("saved_username", session.username)
+                .putString("saved_fullname", session.fullName)
+                .putString("saved_token", session.token)
+                .putString("saved_avatar_url", session.avatarUrl)
+                .apply()
+
             // 2. Generate local E2EE keys if they don't already exist
             var keyPairEntity = repository.getUserKeyPair(session.username)
             if (keyPairEntity == null) {
@@ -148,6 +189,10 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun logout() {
+        // Clear SharedPreferences
+        val sharedPrefs = getApplication<Application>().getSharedPreferences("ciphergram_prefs", Context.MODE_PRIVATE)
+        sharedPrefs.edit().clear().apply()
+
         _userSession.value = null
         _localKeyPair.value = null
         _currentScreen.value = Screen.Login
