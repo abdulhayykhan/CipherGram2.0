@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import android.app.Application
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import android.content.Context
 import android.util.Base64
 import android.util.Log
@@ -188,6 +189,40 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
             }
 
             _isGeneratingKeys.value = false
+            
+            // Auto-register FCM device token for wake-up pings
+            try {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        val fcmToken = task.result
+                        if (fcmToken != null) {
+                            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                try {
+                                    val client = okhttp3.OkHttpClient()
+                                    val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+                                    val json = org.json.JSONObject().apply {
+                                        put("username", session.username)
+                                        put("fcm_token", fcmToken)
+                                    }
+                                    val requestBody = okhttp3.RequestBody.create(mediaType, json.toString())
+                                    val request = okhttp3.Request.Builder()
+                                        .url("https://ciphergram-signaling-620054685556.europe-west1.run.app/api/register_device")
+                                        .post(requestBody)
+                                        .build()
+                                    client.newCall(request).execute().use { response ->
+                                        Log.d("CipherGramViewModel", "FCM device registration completed. Code: ${response.code}")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("CipherGramViewModel", "FCM auto-register API call failure", e)
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("CipherGramViewModel", "FirebaseMessaging token retrieval error", e)
+            }
+
             _currentScreen.value = Screen.ChatList
         }
     }

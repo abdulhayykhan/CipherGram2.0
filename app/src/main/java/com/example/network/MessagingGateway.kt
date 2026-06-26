@@ -41,14 +41,14 @@ class OkHttpWebSocketGateway(
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build(),
-    private val apiBaseUrl: String = "https://echo.websocket.org" // Reference public fallback or local "http://10.0.2.2:8000"
+    private val apiBaseUrl: String = "https://ciphergram-signaling-620054685556.europe-west1.run.app"
 ) : MessagingGateway {
 
     private val TAG = "OkHttpWebSocketGateway"
     
-    // In emulator / real dev, point to local machine's FastAPI server, fallback to echo otherwise
-    private val targetApiUrl = if (apiBaseUrl.contains("echo.websocket.org")) "http://10.0.2.2:8000" else apiBaseUrl
-    private val targetWsUrl = if (apiBaseUrl.contains("echo.websocket.org")) "ws://10.0.2.2:8000" else apiBaseUrl.replace("http://", "ws://").replace("https://", "wss://")
+    // Connect to live FastAPI signaling service
+    private val targetApiUrl = apiBaseUrl
+    private val targetWsUrl = apiBaseUrl.replace("http://", "ws://").replace("https://", "wss://")
 
     override val isAvailable: Boolean = true
 

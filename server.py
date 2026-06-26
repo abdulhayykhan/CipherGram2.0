@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 CipherGram 2.0 - Companion Signaling & Routing Backend Service
-Implemented with FastAPI and WebSockets.
+Implemented with FastAPI, WebSockets, and Firebase Cloud Messaging (FCM).
 
 This backend serves as a blind router. It:
 1. Stores user public pre-key bundles (Identity Key, Signed Pre-Key, OPKs) for out-of-band X3DH handshake execution.
 2. Relays ASCII-armored encrypted end-to-end envelopes over WebSockets or HTTP REST without ever being able to decrypt or view the payload content.
-
-To run this backend:
-    pip install fastapi uvicorn websockets
-    uvicorn server:app --host 0.0.0.0 --port 8000
+3. Automatically triggers FCM wake-up pings (action: WAKE_SYNC) to alert sleeping clients to poll the pending queue.
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, status
@@ -17,22 +14,32 @@ from pydantic import BaseModel
 from typing import Dict, Optional, List
 import logging
 import json
+import firebase_admin
+from firebase_admin import credentials, messaging
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CipherGramBackend")
 
+# Initialize Firebase Admin SDK
+try:
+    firebase_admin.initialize_app()
+    logger.info("Firebase Admin SDK successfully initialized.")
+except Exception as e:
+    logger.warning(f"Could not initialize Firebase Admin SDK with default credentials: {e}. Running with mock FCM support.")
+
 app = FastAPI(
     title="CipherGram Signaling Server",
-    description="A blind routing and key exchange pre-key bundle coordinator for CipherGram E2EE client.",
+    description="A blind routing, key exchange pre-key bundle coordinator, and FCM notifier for CipherGram E2EE client.",
     version="2.0.0"
 )
 
-# In-memory storage for user public profile and pre-key bundles
-# In production, back this with Redis, PostgreSQL, or MongoDB
+# In-memory storage for user public profiles, pre-key bundles, device FCM tokens, and offline envelope queues
 user_prekey_bundles: Dict[str, dict] = {}
 user_profiles: Dict[str, dict] = {}
 active_connections: Dict[str, WebSocket] = {}
+device_tokens: Dict[str, str] = {}
+pending_envelopes: Dict[str, List[dict]] = {}
 
 class PreKeyBundleModel(BaseModel):
     identityKeyBase64: str
@@ -55,13 +62,18 @@ class MessageEnvelopeModel(BaseModel):
     timestamp: int
     isEncrypted: bool
 
+class DeviceTokenModel(BaseModel):
+    username: str
+    fcm_token: str
+
 @app.get("/")
 def read_root():
     return {
         "status": "online",
         "service": "CipherGram Blind Signaling Server",
         "active_users_count": len(user_profiles),
-        "active_ws_connections": len(active_connections)
+        "active_ws_connections": len(active_connections),
+        "registered_devices_count": len(device_tokens)
     }
 
 @app.post("/api/register", status_code=status.HTTP_201_CREATED)
@@ -75,6 +87,14 @@ def register_user(profile: UserProfileModel):
     user_prekey_bundles[username_clean] = profile.preKeyBundle.dict()
     logger.info(f"Registered user: {username_clean} with identity public key: {profile.preKeyBundle.identityKeyBase64[:16]}...")
     return {"status": "success", "message": f"User {username_clean} registered successfully"}
+
+@app.post("/api/register_device")
+@app.post("/register_device")
+def register_device(device: DeviceTokenModel):
+    username_clean = device.username.lower().strip()
+    device_tokens[username_clean] = device.fcm_token
+    logger.info(f"Registered device FCM token for user: {username_clean}")
+    return {"status": "success", "message": f"Device registered successfully for user {username_clean}"}
 
 @app.get("/api/bundle/{username}", response_model=PreKeyBundleModel)
 def get_user_bundle(username: str):
@@ -117,10 +137,32 @@ async def dispatch_envelope(envelope: MessageEnvelopeModel):
             logger.error(f"Failed to route envelope to active WebSocket for {recipient_clean}: {e}")
             del active_connections[recipient_clean]
             
-    # If the socket is offline, message is simulated as queued or ready for REST sync pull
-    # In production, write to a Spanner/SQLite store queue here.
-    logger.info(f"Recipient '{recipient_clean}' is offline. Envelope cached for next polling/reconnection.")
-    return {"status": "success", "routed": "queued_offline"}
+    # If the recipient is offline, queue the message envelope
+    if recipient_clean not in pending_envelopes:
+        pending_envelopes[recipient_clean] = []
+    pending_envelopes[recipient_clean].append(envelope.dict())
+    logger.info(f"Recipient '{recipient_clean}' is offline. Envelope cached in pending queue. Queue size: {len(pending_envelopes[recipient_clean])}")
+    
+    # Send wake-up notification over FCM
+    fcm_token = device_tokens.get(recipient_clean)
+    if fcm_token:
+        try:
+            msg = messaging.Message(
+                data={
+                    "action": "WAKE_SYNC",
+                    "threadId": envelope.threadId,
+                    "sender": envelope.sender
+                },
+                token=fcm_token
+            )
+            resp = messaging.send(msg)
+            logger.info(f"Successfully sent WAKE_SYNC FCM wake-up ping to {recipient_clean}. ID: {resp}")
+        except Exception as e:
+            logger.error(f"Failed to dispatch FCM wake-up ping to {recipient_clean}: {e}")
+    else:
+        logger.warning(f"No FCM token registered for offline recipient '{recipient_clean}'")
+
+    return {"status": "success", "routed": "queued_offline_fcm_pinged"}
 
 @app.websocket("/ws/{username}")
 async def websocket_endpoint(websocket: WebSocket, username: str):
@@ -129,29 +171,58 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
     active_connections[username_clean] = websocket
     logger.info(f"WebSocket tunnel opened for active subscriber: {username_clean}")
     
+    # Immediately flush and deliver any pending queued envelopes
+    if username_clean in pending_envelopes and pending_envelopes[username_clean]:
+        queued_count = len(pending_envelopes[username_clean])
+        logger.info(f"Flushing and draining {queued_count} pending envelopes for: {username_clean}")
+        try:
+            for env in pending_envelopes[username_clean]:
+                await websocket.send_text(json.dumps(env))
+            pending_envelopes[username_clean] = []
+            logger.info(f"Drained all envelopes successfully for: {username_clean}")
+        except Exception as e:
+            logger.error(f"Failed to deliver pending envelopes to {username_clean}: {e}")
+
     try:
         while True:
             # Receive standard framing
             data = await websocket.receive_text()
             logger.info(f"Received WebSocket packet from {username_clean}: {data}")
             
-            # Simple Echo Loop or direct echo back to verify socket integrity.
-            # Real routing is driven via /api/dispatch for robust threading.
+            # Simple routing loop driven via WebSocket
             try:
                 payload = json.loads(data)
-                # If they send a message frame, we route it immediately
                 if "recipient" in payload:
                     recipient = payload["recipient"].lower().strip()
                     if recipient in active_connections:
                         await active_connections[recipient].send_text(data)
                         logger.info(f"Re-routed WebSocket frame from {username_clean} to {recipient}")
                     else:
+                        # Queue message if recipient is offline
+                        if recipient not in pending_envelopes:
+                            pending_envelopes[recipient] = []
+                        pending_envelopes[recipient].append(payload)
+                        
+                        fcm_token = device_tokens.get(recipient)
+                        if fcm_token:
+                            try:
+                                msg = messaging.Message(
+                                    data={
+                                        "action": "WAKE_SYNC",
+                                        "threadId": payload.get("threadId", f"thread_{username_clean}"),
+                                        "sender": username_clean
+                                    },
+                                    token=fcm_token
+                                )
+                                messaging.send(msg)
+                            except Exception as fcm_err:
+                                logger.error(f"WebSocket routing FCM error: {fcm_err}")
+                        
                         await websocket.send_text(json.dumps({
                             "status": "info",
-                            "message": f"User {recipient} is currently offline. Frame queued."
+                            "message": f"User {recipient} is currently offline. Frame queued and FCM wake-up triggered."
                         }))
             except Exception as e:
-                # If invalid json, echo back as a generic keepalive or raw stream frame
                 await websocket.send_text(json.dumps({"echo": data, "sender": username_clean}))
     except WebSocketDisconnect:
         logger.info(f"WebSocket connection closed for subscriber: {username_clean}")
