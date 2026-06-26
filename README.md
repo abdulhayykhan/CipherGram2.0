@@ -1,21 +1,77 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# CipherGram2.0
 
-# Run and deploy your AI Studio app
+An end-to-end encrypted (E2EE) messaging client built exclusively for Instagram Direct Messages, featuring inline media parsing and native OS share integration. 
 
-This contains everything you need to run your app locally.
+## Architecture
 
-View your app in AI Studio: https://ai.studio/apps/c41d5729-fd8b-46f9-a63b-878b40664762
+* **Framework**: Native Android built with Kotlin and Jetpack Compose.
+* **Database**: Room Database for secure, localized storage of cached message historical records.
+* **State Management**: MVVM (Model-View-ViewModel) utilizing architectural decoupled data streams.
+* **Security**: Client-side cryptography engines overriding insecure transmission layers with hardware-backed biometric checks.
 
-## Run Locally
+## Features
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+* **End-to-End Encryption**: Robust local encryption layers mapping standard text wrappers seamlessly over network hooks via custom cryptographic pipelines.
+* **Direct Previews**: In-app native extraction, parsing, and rendering architectures for modular processing of Instagram Posts and Reels.
+* **OS-Level Share Sheet**: System-level integration targeting incoming external Send Intent registries for quick multi-contact sharing.
+* **Cloud Infrastructure Sync**: Hybrid automated workflows handling state distribution through managed Firebase connection points.
 
+## Security
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+Operates utilizing standard AndroidX Biometric cryptosystem pipelines coupled with secure asymmetric key processing engines (`E2EECryptoEngine`). Private key rings remain isolated entirely within the device's hardware Keystore boundary.
+
+## Local Setup
+
+**Prerequisites**: Android Studio, JDK 17+.
+
+1. **Clone repository**:
+
+```bash
+git clone <repository-url>
+cd CipherGram2.0
+
+```
+
+2. **Open Project**:
+Launch Android Studio and select **Open**. Navigate to the `CipherGram2.0` directory.
+3. **Sync Gradle**:
+Allow Android Studio to download necessary AndroidX, Room, Firebase, and Compose dependencies.
+4. **Run application**:
+Connect a physical Android device via USB (enable USB debugging) or start an AVD emulator. Click **Run**.
+
+## Deployment Strategy (CI/CD Pipeline)
+
+1. **Automated Compilation**: The GitHub Actions workflow compiles both release and debug APK flavors concurrently.
+2. **Graceful Fallback Signing**: Employs a robust `build.gradle.kts` validation sequence utilizing fallback debug keystores natively when production secrets are unavailable.
+3. **Automated Release Notes**: Once completed, the build lifecycle outputs automated release tags containing high-contrast direct downlinks.
+
+## Local Data Models
+
+* `UserSession` (Entity): Controls individual auth session boundaries and active Instagram token states.
+* `EncryptedMessage` (Entity): Standard cryptographic payload storing encrypted texts, timestamps, and parsing signatures.
+* `CipherGramDao`: Exposes SQLite transaction layers wrapping target database channels.
+* `E2EECryptoEngine`: Cryptographic engine running algorithmic ratchets on local devices.
+
+## Project Structure
+
+```text
+CipherGram2.0/
+├── .github/workflows/    # GitHub Actions android-release.yml compilation rules
+├── app/src/main/java/com/example/
+│   ├── cryptography/     # E2EECryptoEngine key processing operations
+│   ├── database/         # Room schema declarations, entities, repositories
+│   ├── ui/screens/       # Compose screens (ChatList, ChatThread, ShareDispatchSheet)
+│   ├── ui/theme/         # System font, styling, color tokens
+│   └── viewmodel/        # Unified state processors handling backend data bridges
+├── app/src/main/res/     # Vector drawables and system XML configurations
+└── build.gradle.kts      # Project module configurations 
+
+```
+
+## 📄 License
+
+This project is open-source and available for educational and commercial use under the MIT License.
+
+---
+
+**Made with ❤️ by [Abdul Hayy Khan](https://www.google.com/search?q=https://www.linkedin.com/in/abdulhayykhan)**
