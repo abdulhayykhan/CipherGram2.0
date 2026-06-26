@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Git metadata
+.git
+.github
+.gitignore
+
+# Local databases
+*.db
+*.sqlite
+
+# IDEs
+.idea/
+.vscode/
+
+# Gradle / Android project files to avoid bloat
+.gradle/
+app/build/
+build/
+local.properties
