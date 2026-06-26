@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "474771196982",
+    "project_id": "ciphergram2",
+    "storage_bucket": "ciphergram2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:474771196982:android:400e2a32853b5f725c5c97",
+        "android_client_info": {
+          "package_name": "com.aistudio.ciphergram.qykjxz"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAN2WEfUONf9zNqgq6yHJkKHkz4PlCDVNE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -59,8 +59,33 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
         // For development baseline, let's keep it clean
     }
 
+    private var activeThreadId: String? = null
+
+    fun enterChatThread(threadId: String) {
+        val session = _userSession.value ?: return
+        activeThreadId = threadId
+        FirebaseSyncManager.startListeningToThread(
+            getApplication(),
+            threadId = threadId,
+            localUsername = session.username,
+            repository = repository
+        )
+    }
+
+    fun exitChatThread() {
+        activeThreadId?.let {
+            FirebaseSyncManager.stopListeningToThread(it)
+        }
+        activeThreadId = null
+    }
+
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
+        if (screen is Screen.ChatThread) {
+            enterChatThread(screen.threadId)
+        } else {
+            exitChatThread()
+        }
     }
 
     fun setSharedMediaUrl(url: String?) {
@@ -107,6 +132,16 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
             }
             _localKeyPair.value = keyPairEntity
 
+            // 3. Publish profile to Firestore for real-time E2EE discovery
+            if (keyPairEntity != null) {
+                FirebaseSyncManager.publishUserProfile(
+                    username = session.username,
+                    fullName = session.fullName,
+                    publicKeyBase64 = keyPairEntity.publicKeyBase64,
+                    avatarUrl = session.avatarUrl
+                )
+            }
+
             _isGeneratingKeys.value = false
             _currentScreen.value = Screen.ChatList
         }
@@ -124,11 +159,25 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
     fun sendMessage(threadId: String, contactUsername: String, text: String, mediaUrl: String? = null, mediaType: String? = null, mediaThumbnail: String? = null, mediaCaption: String? = null) {
         val session = _userSession.value ?: return
         viewModelScope.launch {
-            repository.encryptOutgoingMessage(
+            val messageEntity = repository.encryptOutgoingMessage(
                 threadId = threadId,
                 senderUsername = session.username,
                 contactUsername = contactUsername,
                 text = text,
+                mediaUrl = mediaUrl,
+                mediaType = mediaType,
+                mediaThumbnail = mediaThumbnail,
+                mediaCaption = mediaCaption
+            )
+
+            // Publish message to Firestore
+            FirebaseSyncManager.publishMessage(
+                threadId = threadId,
+                messageId = messageEntity.messageId,
+                senderUsername = session.username,
+                payload = messageEntity.payload,
+                isEncrypted = messageEntity.isEncrypted,
+                timestamp = messageEntity.timestamp,
                 mediaUrl = mediaUrl,
                 mediaType = mediaType,
                 mediaThumbnail = mediaThumbnail,

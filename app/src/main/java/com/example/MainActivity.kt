@@ -157,23 +157,44 @@ fun BoxWithScreenTransition(
                     },
                     onAddChat = { username, fullName, isE2E, pubKey ->
                         val newThreadId = "thread_${username.lowercase()}"
-                        val newChat = ChatEntity(
-                            threadId = newThreadId,
-                            contactUsername = username,
-                            contactFullName = fullName.ifEmpty { username },
-                            avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80",
-                            isE2EEnabled = isE2E,
-                            lastMessageText = if (isE2E) "🔐 Click to initialize tunnel keys" else "Hey let's chat!",
-                            lastMessageTime = System.currentTimeMillis()
-                        )
                         
                         coroutineScope.launch {
+                            var finalFullName = fullName.ifEmpty { username }
+                            var finalPubKey = pubKey
+                            var hasE2E = isE2E
+
+                            // Look up friend's profile on Firebase Firestore
+                            if (com.example.database.FirebaseSyncManager.isFirebaseAvailable) {
+                                val remoteProfile = com.example.database.FirebaseSyncManager.findUserProfile(username)
+                                if (remoteProfile != null) {
+                                    val dbName = remoteProfile["fullName"] as? String
+                                    val dbPubKey = remoteProfile["publicKeyBase64"] as? String
+                                    if (!dbName.isNullOrEmpty()) {
+                                        finalFullName = dbName
+                                    }
+                                    if (!dbPubKey.isNullOrEmpty()) {
+                                        finalPubKey = dbPubKey
+                                        hasE2E = true // Auto-enable E2EE since they have a key!
+                                    }
+                                }
+                            }
+
+                            val newChat = ChatEntity(
+                                threadId = newThreadId,
+                                contactUsername = username,
+                                contactFullName = finalFullName,
+                                avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80",
+                                isE2EEnabled = hasE2E,
+                                lastMessageText = if (hasE2E) "🔐 E2EE Secure Tunnel Active" else "Hey let's chat!",
+                                lastMessageTime = System.currentTimeMillis()
+                            )
+
                             // Save contact details to Database
                             viewModel.repository.insertChat(newChat)
                             
                             // Save contact's keys if E2EE
-                            if (isE2E) {
-                                val finalPubKey = pubKey.ifEmpty {
+                            if (hasE2E) {
+                                val keyToInsert = finalPubKey.ifEmpty {
                                     // Generate a mock public key if none provided
                                     val mockKP = E2EECryptoEngine.generateKeyPair()
                                     if (mockKP != null) E2EECryptoEngine.publicKeyToBase64(mockKP.public) else ""
@@ -181,12 +202,26 @@ fun BoxWithScreenTransition(
                                 viewModel.repository.insertContactKey(
                                     com.example.database.ContactKeyEntity(
                                         contactUsername = username,
-                                        publicKeyBase64 = finalPubKey,
-                                        isVerified = pubKey.isNotEmpty()
+                                        publicKeyBase64 = keyToInsert,
+                                        isVerified = finalPubKey.isNotEmpty()
                                     )
                                 )
                             }
                             
+                            // Register thread metadata in Firestore so recipient can find it
+                            if (com.example.database.FirebaseSyncManager.isFirebaseAvailable) {
+                                val currentUserSession = viewModel.userSession.value
+                                if (currentUserSession != null) {
+                                    com.example.database.FirebaseSyncManager.publishThreadMetadata(
+                                        threadId = newThreadId,
+                                        contactUsername = currentUserSession.username,
+                                        contactFullName = currentUserSession.fullName,
+                                        avatarUrl = currentUserSession.avatarUrl,
+                                        isE2EEnabled = hasE2E
+                                    )
+                                }
+                            }
+
                             viewModel.navigateTo(Screen.ChatThread(newThreadId))
                         }
                     },

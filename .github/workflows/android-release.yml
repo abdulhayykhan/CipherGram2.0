@@ -38,35 +38,40 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Create Dummy google-services.json
+      - name: Create Dummy google-services.json if missing
         run: |
-          echo '{
-            "project_info": {
-              "project_number": "1234567890",
-              "project_id": "dummy-project"
-            },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:1234567890:android:abcdef123456",
-                  "android_client_info": {
-                    "package_name": "com.aistudio.ciphergram.qykjxz"
-                  }
-                },
-                "api_key": [
-                  {
-                    "current_key": "dummy_key"
-                  }
-                ],
-                "services": {
-                  "appinvite_service": {
-                    "other_platform_oauth_client": []
+          if [ ! -f "app/google-services.json" ]; then
+            echo "Creating dummy google-services.json fallback..."
+            echo '{
+              "project_info": {
+                "project_number": "1234567890",
+                "project_id": "dummy-project"
+              },
+              "client": [
+                {
+                  "client_info": {
+                    "mobilesdk_app_id": "1:1234567890:android:abcdef123456",
+                    "android_client_info": {
+                      "package_name": "com.aistudio.ciphergram.qykjxz"
+                    }
+                  },
+                  "api_key": [
+                    {
+                      "current_key": "dummy_key"
+                    }
+                  ],
+                  "services": {
+                    "appinvite_service": {
+                      "other_platform_oauth_client": []
+                    }
                   }
                 }
-              }
-            ],
-            "configuration_version": "1"
-          }' > app/google-services.json
+              ],
+              "configuration_version": "1"
+            }' > app/google-services.json
+          else
+            echo "Real google-services.json detected in repository, skipping fallback creation."
+          fi
 
       - name: Build Debug and Release APKs
         run: gradle assembleDebug assembleRelease --stacktrace
