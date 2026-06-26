@@ -9,13 +9,13 @@ This backend serves as a blind router. It:
 3. Automatically triggers FCM wake-up pings (action: WAKE_SYNC) to alert sleeping clients to poll the pending queue.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, status, Header, Depends
 from pydantic import BaseModel
 from typing import Dict, Optional, List
 import logging
 import json
 import firebase_admin
-from firebase_admin import credentials, messaging, firestore
+from firebase_admin import credentials, messaging, firestore, app_check
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -30,6 +30,22 @@ except Exception as e:
 
 # Initialize Firestore client
 db = firestore.client()
+
+def verify_app_check_token(x_firebase_appcheck: Optional[str] = Header(None, alias="X-Firebase-AppCheck")):
+    if not x_firebase_appcheck:
+        logger.error("Missing X-Firebase-AppCheck header")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Invalid App Check Token"
+        )
+    try:
+        app_check.verify_token(x_firebase_appcheck)
+    except Exception as e:
+        logger.error(f"App Check token verification failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Invalid App Check Token"
+        )
 
 app = FastAPI(
     title="CipherGram Signaling Server",
@@ -73,7 +89,7 @@ def read_root():
         "active_ws_connections": len(active_connections)
     }
 
-@app.post("/api/register", status_code=status.HTTP_201_CREATED)
+@app.post("/api/register", status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_app_check_token)])
 def register_user(profile: UserProfileModel):
     username_clean = profile.username.lower().strip()
     
@@ -129,7 +145,7 @@ def get_all_profiles():
     docs = db.collection("user_profiles").stream()
     return [doc.to_dict() for doc in docs]
 
-@app.post("/api/dispatch")
+@app.post("/api/dispatch", dependencies=[Depends(verify_app_check_token)])
 async def dispatch_envelope(envelope: MessageEnvelopeModel):
     recipient_clean = envelope.recipient.lower().strip()
     logger.info(f"Dispatching envelope from '{envelope.sender}' to '{recipient_clean}' (encrypted: {envelope.isEncrypted})")
@@ -177,6 +193,21 @@ async def dispatch_envelope(envelope: MessageEnvelopeModel):
 @app.websocket("/ws/{username}")
 async def websocket_endpoint(websocket: WebSocket, username: str):
     username_clean = username.lower().strip()
+    
+    # Extract and verify App Check token from WebSocket handshake headers
+    token = websocket.headers.get("x-firebase-appcheck")
+    if not token:
+        logger.error(f"WebSocket handshake missing X-Firebase-AppCheck header for {username_clean}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Forbidden: Invalid App Check Token")
+        return
+        
+    try:
+        app_check.verify_token(token)
+    except Exception as e:
+        logger.error(f"WebSocket App Check token verification failed for {username_clean}: {e}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Forbidden: Invalid App Check Token")
+        return
+
     await websocket.accept()
     active_connections[username_clean] = websocket
     logger.info(f"WebSocket tunnel opened for active subscriber: {username_clean}")

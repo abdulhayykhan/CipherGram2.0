@@ -14,6 +14,7 @@ import com.example.database.ChatEntity
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -94,7 +95,16 @@ class CipherGramFCMService : FirebaseMessagingService() {
             .build()
 
         val wsUrl = "wss://ciphergram-signaling-620054685556.europe-west1.run.app/ws/$username"
-        val request = Request.Builder().url(wsUrl).build()
+        val requestBuilder = Request.Builder().url(wsUrl)
+        try {
+            val token = com.google.firebase.appcheck.FirebaseAppCheck.getInstance().getAppCheckToken(false).await().token
+            if (!token.isNullOrEmpty()) {
+                requestBuilder.header("X-Firebase-AppCheck", token)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "App Check token retrieval failed in FCM service", e)
+        }
+        val request = requestBuilder.build()
 
         val database = CipherGramDatabase.getDatabase(applicationContext)
         val dao = database.cipherGramDao()

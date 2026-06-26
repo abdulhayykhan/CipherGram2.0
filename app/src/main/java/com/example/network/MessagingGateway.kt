@@ -52,10 +52,26 @@ class OkHttpWebSocketGateway(
 
     override val isAvailable: Boolean = true
 
+    private suspend fun getAppCheckToken(): String? {
+        return try {
+            val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
+            val tokenResult = appCheck.getAppCheckToken(false).await()
+            tokenResult.token
+        } catch (e: Exception) {
+            Log.e(TAG, "App Check token retrieval failed", e)
+            null
+        }
+    }
+
     override fun observeIncomingMessages(threadId: String, localUsername: String): Flow<MessageEntity> = callbackFlow {
         val requestUrl = "$targetWsUrl/ws/$localUsername"
         Log.d(TAG, "Opening real WebSocket to: $requestUrl")
-        val request = Request.Builder().url(requestUrl).build()
+        val requestBuilder = Request.Builder().url(requestUrl)
+        val token = getAppCheckToken()
+        if (!token.isNullOrEmpty()) {
+            requestBuilder.header("X-Firebase-AppCheck", token)
+        }
+        val request = requestBuilder.build()
         
         val webSocketListener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -114,8 +130,12 @@ class OkHttpWebSocketGateway(
         return try {
             val recipient = threadId.substringAfter("thread_")
             val mediaType = "application/json".toMediaTypeOrNull()
-            val request = Request.Builder()
-                .url("$targetApiUrl/api/dispatch")
+            val requestBuilder = Request.Builder().url("$targetApiUrl/api/dispatch")
+            val token = getAppCheckToken()
+            if (!token.isNullOrEmpty()) {
+                requestBuilder.header("X-Firebase-AppCheck", token)
+            }
+            val request = requestBuilder
                 .post(RequestBody.create(
                     mediaType,
                     """
@@ -181,8 +201,12 @@ class OkHttpWebSocketGateway(
                 }
             """.trimIndent()
 
-            val request = Request.Builder()
-                .url("$targetApiUrl/api/register")
+            val requestBuilder = Request.Builder().url("$targetApiUrl/api/register")
+            val token = getAppCheckToken()
+            if (!token.isNullOrEmpty()) {
+                requestBuilder.header("X-Firebase-AppCheck", token)
+            }
+            val request = requestBuilder
                 .post(RequestBody.create(mediaType, requestBody))
                 .build()
 
@@ -202,10 +226,12 @@ class OkHttpWebSocketGateway(
 
     override suspend fun findUserProfile(username: String): Map<String, Any>? {
         return try {
-            val request = Request.Builder()
-                .url("$targetApiUrl/api/profile/$username")
-                .get()
-                .build()
+            val requestBuilder = Request.Builder().url("$targetApiUrl/api/profile/$username")
+            val token = getAppCheckToken()
+            if (!token.isNullOrEmpty()) {
+                requestBuilder.header("X-Firebase-AppCheck", token)
+            }
+            val request = requestBuilder.get().build()
 
             withContext(Dispatchers.IO) {
                 client.newCall(request).execute().use { response ->
@@ -219,10 +245,12 @@ class OkHttpWebSocketGateway(
                             profileMap["avatarUrl"] = body.substringAfter("\"avatarUrl\":\"").substringBefore("\"")
                         }
                         // Fetch the bundle's public identity key
-                        val bundleRequest = Request.Builder()
-                            .url("$targetApiUrl/api/bundle/$username")
-                            .get()
-                            .build()
+                        val bundleRequestBuilder = Request.Builder().url("$targetApiUrl/api/bundle/$username")
+                        val bundleToken = getAppCheckToken()
+                        if (!bundleToken.isNullOrEmpty()) {
+                            bundleRequestBuilder.header("X-Firebase-AppCheck", bundleToken)
+                        }
+                        val bundleRequest = bundleRequestBuilder.get().build()
                         client.newCall(bundleRequest).execute().use { bundleResp ->
                             if (bundleResp.isSuccessful) {
                                 val bundleBody = bundleResp.body?.string() ?: ""
