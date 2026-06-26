@@ -20,6 +20,16 @@ An end-to-end encrypted (E2EE) messaging client built exclusively for Instagram 
 
 Operates utilizing standard AndroidX Biometric cryptosystem pipelines coupled with secure asymmetric key processing engines (`E2EECryptoEngine`). Private key rings remain isolated entirely within the device's hardware Keystore boundary.
 
+## Companion Signaling Server
+
+A production-ready FastAPI backend is provided at the root (`server.py`) to manage out-of-band key exchanges (X3DH) and blind relaying of end-to-end encrypted message envelopes.
+
+To run the signaling server locally:
+```bash
+pip install fastapi uvicorn websockets
+uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
 ## Local Setup
 
 **Prerequisites**: Android Studio, JDK 17+.

@@ -32,6 +32,7 @@ class CipherGramRepository(
     }
 
     val allChats: Flow<List<ChatEntity>> = dao.getAllChats()
+    val allContactKeys: Flow<List<ContactKeyEntity>> = dao.getAllContactKeys()
 
     fun getMessagesForThread(threadId: String): Flow<List<MessageEntity>> {
         return dao.getMessagesForThread(threadId)
@@ -72,7 +73,21 @@ class CipherGramRepository(
         mediaCaption: String? = null
     ): MessageEntity {
         val userKeys = dao.getUserKeyPair(senderUsername)
-        val contactKeys = dao.getContactKey(contactUsername)
+        var contactKeys = dao.getContactKey(contactUsername)
+
+        if (contactKeys == null) {
+            val remoteProfile = gateway.findUserProfile(contactUsername)
+            val remotePubKeyB64 = remoteProfile?.get("publicKeyBase64") as? String
+            if (!remotePubKeyB64.isNullOrEmpty()) {
+                val newKey = ContactKeyEntity(
+                    contactUsername = contactUsername,
+                    publicKeyBase64 = remotePubKeyB64,
+                    isVerified = false
+                )
+                dao.insertContactKey(newKey)
+                contactKeys = newKey
+            }
+        }
 
         var isEncrypted: Boolean
         var finalPayload: String

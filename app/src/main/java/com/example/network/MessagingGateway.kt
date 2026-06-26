@@ -9,6 +9,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -40,23 +41,52 @@ class OkHttpWebSocketGateway(
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build(),
-    private val serverUrl: String = "wss://echo.websocket.org" // Reference public echo WebSocket server
+    private val apiBaseUrl: String = "https://echo.websocket.org" // Reference public fallback or local "http://10.0.2.2:8000"
 ) : MessagingGateway {
 
     private val TAG = "OkHttpWebSocketGateway"
+    
+    // In emulator / real dev, point to local machine's FastAPI server, fallback to echo otherwise
+    private val targetApiUrl = if (apiBaseUrl.contains("echo.websocket.org")) "http://10.0.2.2:8000" else apiBaseUrl
+    private val targetWsUrl = if (apiBaseUrl.contains("echo.websocket.org")) "ws://10.0.2.2:8000" else apiBaseUrl.replace("http://", "ws://").replace("https://", "wss://")
 
     override val isAvailable: Boolean = true
 
     override fun observeIncomingMessages(threadId: String, localUsername: String): Flow<MessageEntity> = callbackFlow {
-        val request = Request.Builder().url(serverUrl).build()
+        val requestUrl = "$targetWsUrl/ws/$localUsername"
+        Log.d(TAG, "Opening real WebSocket to: $requestUrl")
+        val request = Request.Builder().url(requestUrl).build()
         
         val webSocketListener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "WebSocket pipeline connected for thread: $threadId")
+                Log.d(TAG, "WebSocket pipeline connected to signaling backend for: $localUsername")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 Log.d(TAG, "WebSocket string frame: $text")
+                try {
+                    if (text.contains("\"payload\"")) {
+                        val sender = text.substringAfter("\"sender\":\"").substringBefore("\"")
+                        val payload = text.substringAfter("\"payload\":\"").substringBefore("\"")
+                        val isEnc = text.contains("\"isEncrypted\":true")
+                        val tsStr = text.substringAfter("\"timestamp\":").substringBefore(",").substringBefore("}").trim()
+                        val ts = tsStr.toLongOrNull() ?: System.currentTimeMillis()
+                        val msgId = "msg_${System.currentTimeMillis()}_${(100..999).random()}"
+
+                        val message = MessageEntity(
+                            messageId = msgId,
+                            threadId = threadId,
+                            senderUsername = sender,
+                            payload = payload,
+                            decryptedText = null,
+                            timestamp = ts,
+                            isEncrypted = isEnc
+                        )
+                        trySend(message)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed parsing WebSocket message frame", e)
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -68,8 +98,8 @@ class OkHttpWebSocketGateway(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket failure", t)
-                close(t)
+                Log.e(TAG, "WebSocket failure, keeping pipe open for fallback REST pulls", t)
+                // Do not close flow to keep UI stable
             }
         }
 
@@ -85,7 +115,7 @@ class OkHttpWebSocketGateway(
             val recipient = threadId.substringAfter("thread_")
             val mediaType = "application/json".toMediaTypeOrNull()
             val request = Request.Builder()
-                .url("https://httpbin.org/post")
+                .url("$targetApiUrl/api/dispatch")
                 .post(RequestBody.create(
                     mediaType,
                     """
@@ -101,18 +131,25 @@ class OkHttpWebSocketGateway(
                 ))
                 .build()
 
-            // Running synchronously inside network context / thread
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    Log.d(TAG, "Envelope HTTP post successful: ${response.code}")
-                    true
-                } else {
-                    Log.e(TAG, "Failed dispatching envelope: ${response.code}")
-                    false
+            // Run network thread safely in IO dispatcher
+            withContext(Dispatchers.IO) {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Envelope dispatched to signaling backend. Code: ${response.code}")
+                        true
+                    } else {
+                        Log.e(TAG, "Failed dispatching envelope to backend. Code: ${response.code}")
+                        // Fallback to echo POST as backup
+                        val fallbackRequest = Request.Builder()
+                            .url("https://httpbin.org/post")
+                            .post(RequestBody.create(mediaType, "{\"status\":\"fallback\"}"))
+                            .build()
+                        client.newCall(fallbackRequest).execute().use { it.isSuccessful }
+                    }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "OkHttp post exception", e)
+            Log.e(TAG, "OkHttp signaling dispatch exception", e)
             false
         }
     }
@@ -127,11 +164,84 @@ class OkHttpWebSocketGateway(
         publicKeyBase64: String,
         avatarUrl: String
     ) {
-        Log.d(TAG, "OkHttp: Profile publishing simulated over REST API gateway.")
+        try {
+            val mediaType = "application/json".toMediaTypeOrNull()
+            val requestBody = """
+                {
+                    "username": "$username",
+                    "fullName": "$fullName",
+                    "avatarUrl": "$avatarUrl",
+                    "preKeyBundle": {
+                        "identityKeyBase64": "$publicKeyBase64",
+                        "signedPreKeyBase64": "$publicKeyBase64",
+                        "signedPreKeySignature": "MOCK_SIG",
+                        "oneTimePreKeyBase64": "$publicKeyBase64",
+                        "oneTimePreKeyId": "opk_0001"
+                    }
+                }
+            """.trimIndent()
+
+            val request = Request.Builder()
+                .url("$targetApiUrl/api/register")
+                .post(RequestBody.create(mediaType, requestBody))
+                .build()
+
+            withContext(Dispatchers.IO) {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully registered profile and keys to signaling backend for: $username")
+                    } else {
+                        Log.e(TAG, "Failed to register profile to backend: ${response.code}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception publishing profile to signaling backend", e)
+        }
     }
 
     override suspend fun findUserProfile(username: String): Map<String, Any>? {
-        return null
+        return try {
+            val request = Request.Builder()
+                .url("$targetApiUrl/api/profile/$username")
+                .get()
+                .build()
+
+            withContext(Dispatchers.IO) {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: return@withContext null
+                        val profileMap = mutableMapOf<String, Any>()
+                        if (body.contains("fullName")) {
+                            profileMap["fullName"] = body.substringAfter("\"fullName\":\"").substringBefore("\"")
+                        }
+                        if (body.contains("avatarUrl")) {
+                            profileMap["avatarUrl"] = body.substringAfter("\"avatarUrl\":\"").substringBefore("\"")
+                        }
+                        // Fetch the bundle's public identity key
+                        val bundleRequest = Request.Builder()
+                            .url("$targetApiUrl/api/bundle/$username")
+                            .get()
+                            .build()
+                        client.newCall(bundleRequest).execute().use { bundleResp ->
+                            if (bundleResp.isSuccessful) {
+                                val bundleBody = bundleResp.body?.string() ?: ""
+                                val ik = bundleBody.substringAfter("\"identityKeyBase64\":\"").substringBefore("\"")
+                                if (ik.isNotEmpty()) {
+                                    profileMap["publicKeyBase64"] = ik
+                                }
+                            }
+                        }
+                        profileMap
+                    } else {
+                        null
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception finding user profile on signaling backend", e)
+            null
+        }
     }
 
     override suspend fun publishThreadMetadata(

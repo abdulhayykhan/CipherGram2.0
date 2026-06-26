@@ -57,6 +57,9 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
     val chats: StateFlow<List<ChatEntity>> = repository.allChats
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val contactKeys: StateFlow<List<ContactKeyEntity>> = repository.allContactKeys
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         // Automatically check if user was already "logged in"
         viewModelScope.launch {
@@ -218,88 +221,6 @@ class CipherGramViewModel(application: Application) : AndroidViewModel(applicati
 
             // Publish message via Gateway
             repository.gateway.dispatchEnvelope(threadId, messageEntity)
-
-            // Simulate immediate automated E2EE response if recipient is an E2EE contact
-            if (contactUsername == "alex_priv") {
-                simulateReply(threadId, contactUsername, "alex_priv", "I received your secure CipherGram! Your AES key derived via ECDH works perfectly! 🔐")
-            } else if (contactUsername == "clara_reels") {
-                simulateReply(threadId, contactUsername, "clara_reels", "Hey! I'm using the official Instagram app right now, so your client is showing my chats as standard plaintext. No lock icons here! 😊")
-            }
-        }
-    }
-
-    private fun simulateReply(threadId: String, contactUsername: String, senderName: String, replyText: String) {
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(2000) // Realistic typing delay
-            
-            // Check if contact has E2EE keys
-            val senderKeys = repository.getContactKey(senderName)
-            val session = _userSession.value ?: return@launch
-
-            val isEncrypted: Boolean
-            val finalPayload: String
-            val decryptedText: String
-
-            if (senderKeys != null && _localKeyPair.value != null) {
-                // alex_priv replying encrypts using local user's public key
-                // Simulate Alex's private key (re-generate dynamically or use a seeded one)
-                // In a production app, this would arrive encrypted from Alex's phone.
-                // Here we simulate E2EE decryption cleanly:
-                val localUserPubKey = E2EECryptoEngine.publicKeyFromBase64(_localKeyPair.value!!.publicKeyBase64)
-                
-                // alex_priv has a mock key pair, we reconstruct it
-                val alexKeyPair = E2EECryptoEngine.generateKeyPair() // fresh mock or seeded
-                if (alexKeyPair != null && localUserPubKey != null) {
-                    val aesKeySpec = E2EECryptoEngine.deriveSymmetricKey(alexKeyPair.private, localUserPubKey)
-                    if (aesKeySpec != null) {
-                        val encryptedBytes = E2EECryptoEngine.encryptToBytes(replyText, aesKeySpec)
-                        if (encryptedBytes != null) {
-                            isEncrypted = true
-                            finalPayload = SecureEnvelopeProtocol.pack(encryptedBytes)
-                            decryptedText = replyText
-                        } else {
-                            isEncrypted = false
-                            finalPayload = replyText
-                            decryptedText = replyText
-                        }
-                    } else {
-                        isEncrypted = false
-                        finalPayload = replyText
-                        decryptedText = replyText
-                    }
-                } else {
-                    isEncrypted = false
-                    finalPayload = replyText
-                    decryptedText = replyText
-                }
-            } else {
-                isEncrypted = false
-                finalPayload = replyText
-                decryptedText = replyText
-            }
-
-            val incomingMessage = MessageEntity(
-                messageId = "msg_${System.currentTimeMillis()}",
-                threadId = threadId,
-                senderUsername = senderName,
-                payload = finalPayload,
-                decryptedText = decryptedText,
-                timestamp = System.currentTimeMillis(),
-                isEncrypted = isEncrypted
-            )
-
-            repository.insertMessage(incomingMessage)
-
-            // Update chat list
-            val chat = repository.getChatById(threadId)
-            if (chat != null) {
-                repository.insertChat(
-                    chat.copy(
-                        lastMessageText = if (isEncrypted) "🔒 Encrypted Message" else replyText,
-                        lastMessageTime = incomingMessage.timestamp
-                    )
-                )
-            }
         }
     }
 

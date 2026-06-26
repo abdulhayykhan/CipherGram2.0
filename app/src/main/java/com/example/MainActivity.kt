@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
                 val sharedMediaUrl by viewModel.sharedMediaUrl.collectAsStateWithLifecycle()
                 val mediaPlaybackState by viewModel.mediaPlaybackState.collectAsStateWithLifecycle()
                 val chats by viewModel.chats.collectAsStateWithLifecycle()
+                val contactKeys by viewModel.contactKeys.collectAsStateWithLifecycle()
 
                 // Intercept System Back Presses cleanly
                 BackHandler(enabled = currentScreen !is Screen.Login) {
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
                     BoxWithScreenTransition(
                         currentScreen = currentScreen,
                         chats = chats,
+                        contactKeys = contactKeys,
                         viewModel = viewModel,
                         isGeneratingKeys = isGeneratingKeys,
                         localKeyPair = localKeyPair,
@@ -120,6 +122,7 @@ class MainActivity : ComponentActivity() {
 fun BoxWithScreenTransition(
     currentScreen: Screen,
     chats: List<ChatEntity>,
+    contactKeys: List<com.example.database.ContactKeyEntity>,
     viewModel: CipherGramViewModel,
     isGeneratingKeys: Boolean,
     localKeyPair: com.example.database.UserKeyPairEntity?,
@@ -289,9 +292,13 @@ fun BoxWithScreenTransition(
             is Screen.SecuritySettings -> {
                 SecuritySettingsScreen(
                     localKeyPair = localKeyPair,
+                    contactKeys = contactKeys,
                     isRotating = isGeneratingKeys,
                     onRotateKeys = {
                         viewModel.rotateKeys()
+                    },
+                    onToggleVerification = { username ->
+                        viewModel.toggleContactVerification(username)
                     },
                     onBackClick = {
                         viewModel.navigateTo(Screen.ChatList)
