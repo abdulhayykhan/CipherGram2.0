@@ -1,7 +1,13 @@
 package com.example.network
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import com.example.database.CipherGramDatabase
 import com.example.database.MessageEntity
 import com.example.database.ChatEntity
@@ -144,6 +150,9 @@ class CipherGramFCMService : FirebaseMessagingService() {
                                         isE2EEnabled = isEncrypted
                                     ))
                                 }
+
+                                // Trigger a visible Android system notification for the secure message
+                                showSecureNotification(sender)
                             }
                         }
                     }
@@ -169,6 +178,43 @@ class CipherGramFCMService : FirebaseMessagingService() {
         delay(6000)
         ws.close(1000, "Sync complete")
         latch.complete(Unit)
+    }
+
+    private fun showSecureNotification(sender: String) {
+        val channelId = "secure_messages_channel"
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Secure Messages",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "End-to-end encrypted notification updates"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        // Open MainActivity when notification is clicked
+        val intent = Intent(this, com.example.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("New Secure Message")
+            .setContentText("Incoming encrypted CipherGram from @$sender")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+
+        notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
     }
 
     override fun onDestroy() {

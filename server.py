@@ -15,7 +15,7 @@ from typing import Dict, Optional, List
 import logging
 import json
 import firebase_admin
-from firebase_admin import credentials, messaging
+from firebase_admin import credentials, messaging, firestore
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -26,7 +26,10 @@ try:
     firebase_admin.initialize_app()
     logger.info("Firebase Admin SDK successfully initialized.")
 except Exception as e:
-    logger.warning(f"Could not initialize Firebase Admin SDK with default credentials: {e}. Running with mock FCM support.")
+    logger.warning(f"Could not initialize Firebase Admin SDK with default credentials: {e}.")
+
+# Initialize Firestore client
+db = firestore.client()
 
 app = FastAPI(
     title="CipherGram Signaling Server",
@@ -34,12 +37,8 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# In-memory storage for user public profiles, pre-key bundles, device FCM tokens, and offline envelope queues
-user_prekey_bundles: Dict[str, dict] = {}
-user_profiles: Dict[str, dict] = {}
+# Active connections map (Python WebSocket objects are kept in RAM as they cannot be serialized)
 active_connections: Dict[str, WebSocket] = {}
-device_tokens: Dict[str, str] = {}
-pending_envelopes: Dict[str, List[dict]] = {}
 
 class PreKeyBundleModel(BaseModel):
     identityKeyBase64: str
@@ -70,21 +69,26 @@ class DeviceTokenModel(BaseModel):
 def read_root():
     return {
         "status": "online",
-        "service": "CipherGram Blind Signaling Server",
-        "active_users_count": len(user_profiles),
-        "active_ws_connections": len(active_connections),
-        "registered_devices_count": len(device_tokens)
+        "service": "CipherGram Blind Signaling Server with Firestore Persistence",
+        "active_ws_connections": len(active_connections)
     }
 
 @app.post("/api/register", status_code=status.HTTP_201_CREATED)
 def register_user(profile: UserProfileModel):
     username_clean = profile.username.lower().strip()
-    user_profiles[username_clean] = {
+    
+    # Save profile to Firestore
+    profile_data = {
         "username": username_clean,
         "fullName": profile.fullName,
         "avatarUrl": profile.avatarUrl
     }
-    user_prekey_bundles[username_clean] = profile.preKeyBundle.dict()
+    db.collection("user_profiles").document(username_clean).set(profile_data)
+    
+    # Save pre-key bundle to Firestore
+    bundle_data = profile.preKeyBundle.dict()
+    db.collection("pre_key_bundles").document(username_clean).set(bundle_data)
+    
     logger.info(f"Registered user: {username_clean} with identity public key: {profile.preKeyBundle.identityKeyBase64[:16]}...")
     return {"status": "success", "message": f"User {username_clean} registered successfully"}
 
@@ -92,34 +96,38 @@ def register_user(profile: UserProfileModel):
 @app.post("/register_device")
 def register_device(device: DeviceTokenModel):
     username_clean = device.username.lower().strip()
-    device_tokens[username_clean] = device.fcm_token
+    # Save FCM token to Firestore
+    db.collection("device_tokens").document(username_clean).set({"fcm_token": device.fcm_token})
     logger.info(f"Registered device FCM token for user: {username_clean}")
     return {"status": "success", "message": f"Device registered successfully for user {username_clean}"}
 
 @app.get("/api/bundle/{username}", response_model=PreKeyBundleModel)
 def get_user_bundle(username: str):
     username_clean = username.lower().strip()
-    if username_clean not in user_prekey_bundles:
+    doc = db.collection("pre_key_bundles").document(username_clean).get()
+    if not doc.exists:
         logger.warning(f"Pre-key bundle query failed: user {username_clean} not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {username_clean} pre-key bundle not registered yet"
         )
-    return user_prekey_bundles[username_clean]
+    return doc.to_dict()
 
 @app.get("/api/profile/{username}")
 def get_user_profile(username: str):
     username_clean = username.lower().strip()
-    if username_clean not in user_profiles:
+    doc = db.collection("user_profiles").document(username_clean).get()
+    if not doc.exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {username_clean} not found"
         )
-    return user_profiles[username_clean]
+    return doc.to_dict()
 
 @app.get("/api/users")
 def get_all_profiles():
-    return list(user_profiles.values())
+    docs = db.collection("user_profiles").stream()
+    return [doc.to_dict() for doc in docs]
 
 @app.post("/api/dispatch")
 async def dispatch_envelope(envelope: MessageEnvelopeModel):
@@ -135,30 +143,32 @@ async def dispatch_envelope(envelope: MessageEnvelopeModel):
             return {"status": "success", "routed": "live_websocket"}
         except Exception as e:
             logger.error(f"Failed to route envelope to active WebSocket for {recipient_clean}: {e}")
-            del active_connections[recipient_clean]
-            
-    # If the recipient is offline, queue the message envelope
-    if recipient_clean not in pending_envelopes:
-        pending_envelopes[recipient_clean] = []
-    pending_envelopes[recipient_clean].append(envelope.dict())
-    logger.info(f"Recipient '{recipient_clean}' is offline. Envelope cached in pending queue. Queue size: {len(pending_envelopes[recipient_clean])}")
+            if recipient_clean in active_connections:
+                del active_connections[recipient_clean]
+                
+    # If the recipient is offline, queue the message envelope in Firestore
+    envelope_data = envelope.dict()
+    db.collection("users").document(recipient_clean).collection("pending_envelopes").add(envelope_data)
+    logger.info(f"Recipient '{recipient_clean}' is offline. Saved envelope to Firestore sub-collection.")
     
     # Send wake-up notification over FCM
-    fcm_token = device_tokens.get(recipient_clean)
-    if fcm_token:
-        try:
-            msg = messaging.Message(
-                data={
-                    "action": "WAKE_SYNC",
-                    "threadId": envelope.threadId,
-                    "sender": envelope.sender
-                },
-                token=fcm_token
-            )
-            resp = messaging.send(msg)
-            logger.info(f"Successfully sent WAKE_SYNC FCM wake-up ping to {recipient_clean}. ID: {resp}")
-        except Exception as e:
-            logger.error(f"Failed to dispatch FCM wake-up ping to {recipient_clean}: {e}")
+    token_doc = db.collection("device_tokens").document(recipient_clean).get()
+    if token_doc.exists:
+        fcm_token = token_doc.to_dict().get("fcm_token")
+        if fcm_token:
+            try:
+                msg = messaging.Message(
+                    data={
+                        "action": "WAKE_SYNC",
+                        "threadId": envelope.threadId,
+                        "sender": envelope.sender
+                    },
+                    token=fcm_token
+                )
+                resp = messaging.send(msg)
+                logger.info(f"Successfully sent WAKE_SYNC FCM wake-up ping to {recipient_clean}. ID: {resp}")
+            except Exception as e:
+                logger.error(f"Failed to dispatch FCM wake-up ping to {recipient_clean}: {e}")
     else:
         logger.warning(f"No FCM token registered for offline recipient '{recipient_clean}'")
 
@@ -171,17 +181,23 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
     active_connections[username_clean] = websocket
     logger.info(f"WebSocket tunnel opened for active subscriber: {username_clean}")
     
-    # Immediately flush and deliver any pending queued envelopes
-    if username_clean in pending_envelopes and pending_envelopes[username_clean]:
-        queued_count = len(pending_envelopes[username_clean])
-        logger.info(f"Flushing and draining {queued_count} pending envelopes for: {username_clean}")
-        try:
-            for env in pending_envelopes[username_clean]:
-                await websocket.send_text(json.dumps(env))
-            pending_envelopes[username_clean] = []
+    # Immediately flush and deliver any pending queued envelopes from Firestore
+    try:
+        pending_ref = db.collection("users").document(username_clean).collection("pending_envelopes")
+        pending_docs = list(pending_ref.stream())
+        if pending_docs:
+            logger.info(f"Flushing and draining {len(pending_docs)} pending envelopes from Firestore for: {username_clean}")
+            for doc in pending_docs:
+                env_data = doc.to_dict()
+                try:
+                    await websocket.send_text(json.dumps(env_data))
+                    pending_ref.document(doc.id).delete()
+                except Exception as send_err:
+                    logger.error(f"Failed to send pending envelope {doc.id} to {username_clean}: {send_err}")
+                    break
             logger.info(f"Drained all envelopes successfully for: {username_clean}")
-        except Exception as e:
-            logger.error(f"Failed to deliver pending envelopes to {username_clean}: {e}")
+    except Exception as e:
+        logger.error(f"Error flushing pending envelopes from Firestore: {e}")
 
     try:
         while True:
@@ -198,25 +214,26 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         await active_connections[recipient].send_text(data)
                         logger.info(f"Re-routed WebSocket frame from {username_clean} to {recipient}")
                     else:
-                        # Queue message if recipient is offline
-                        if recipient not in pending_envelopes:
-                            pending_envelopes[recipient] = []
-                        pending_envelopes[recipient].append(payload)
+                        # Queue message in Firestore if recipient is offline
+                        db.collection("users").document(recipient).collection("pending_envelopes").add(payload)
+                        logger.info(f"Recipient '{recipient}' is offline. Saved frame to Firestore pending_envelopes.")
                         
-                        fcm_token = device_tokens.get(recipient)
-                        if fcm_token:
-                            try:
-                                msg = messaging.Message(
-                                    data={
-                                        "action": "WAKE_SYNC",
-                                        "threadId": payload.get("threadId", f"thread_{username_clean}"),
-                                        "sender": username_clean
-                                    },
-                                    token=fcm_token
-                                )
-                                messaging.send(msg)
-                            except Exception as fcm_err:
-                                logger.error(f"WebSocket routing FCM error: {fcm_err}")
+                        token_doc = db.collection("device_tokens").document(recipient).get()
+                        if token_doc.exists:
+                            fcm_token = token_doc.to_dict().get("fcm_token")
+                            if fcm_token:
+                                try:
+                                    msg = messaging.Message(
+                                        data={
+                                            "action": "WAKE_SYNC",
+                                            "threadId": payload.get("threadId", f"thread_{username_clean}"),
+                                            "sender": username_clean
+                                        },
+                                        token=fcm_token
+                                    )
+                                    messaging.send(msg)
+                                except Exception as fcm_err:
+                                    logger.error(f"WebSocket routing FCM error: {fcm_err}")
                         
                         await websocket.send_text(json.dumps({
                             "status": "info",
